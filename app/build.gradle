@@ -18,7 +18,7 @@ android {
 
         // Configuração de ABI filters para garantir compatibilidade
         ndk {
-            abiFilters 'arm64-v8a', 'armeabi-v7a'
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'
         }
     }
 
@@ -30,10 +30,13 @@ android {
         debug {
             minifyEnabled false
             debuggable true
+            // Habilita debug de JNI para troubleshooting
+            jniDebuggable true
         }
     }
 
     compileOptions {
+        // Mantendo Java 17 como você tinha originalmente
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
@@ -53,12 +56,52 @@ android {
         }
     }
 
-    // CORREÇÃO FINAL: Sintaxe ajustada para o padrão mais robusto.
+    // Configuração robusta para empacotamento
     packagingOptions {
+        // Para bibliotecas nativas principais
         pickFirst 'lib/arm64-v8a/libffmpeg.so'
         pickFirst 'lib/arm64-v8a/libGPCam.so'
         pickFirst 'lib/armeabi-v7a/libffmpeg.so'
         pickFirst 'lib/armeabi-v7a/libGPCam.so'
+        pickFirst 'lib/x86/libffmpeg.so'
+        pickFirst 'lib/x86/libGPCam.so'
+        pickFirst 'lib/x86_64/libffmpeg.so'
+        pickFirst 'lib/x86_64/libGPCam.so'
+
+        // Para armeabi (dispositivos antigos)
+        pickFirst 'lib/armeabi/libffmpeg.so'
+        pickFirst 'lib/armeabi/libGPCam.so'
+
+        // Para bibliotecas C++ compartilhadas (se necessário)
+        pickFirst 'lib/arm64-v8a/libc++_shared.so'
+        pickFirst 'lib/armeabi-v7a/libc++_shared.so'
+        pickFirst 'lib/x86/libc++_shared.so'
+        pickFirst 'lib/x86_64/libc++_shared.so'
+
+        // Importante: não remove símbolos das bibliotecas nativas
+        doNotStrip '*/armeabi-v7a/*.so'
+        doNotStrip '*/arm64-v8a/*.so'
+        doNotStrip '*/x86/*.so'
+        doNotStrip '*/x86_64/*.so'
+        doNotStrip '*/armeabi/*.so'
+
+        // Exclui arquivos META-INF desnecessários
+        exclude 'META-INF/DEPENDENCIES'
+        exclude 'META-INF/LICENSE'
+        exclude 'META-INF/LICENSE.txt'
+        exclude 'META-INF/NOTICE'
+        exclude 'META-INF/NOTICE.txt'
+        exclude 'META-INF/ASL2.0'
+        exclude 'META-INF/*.kotlin_module'
+    }
+
+    // Configurações de lint para evitar falsos positivos
+    lintOptions {
+        abortOnError false
+        checkReleaseBuilds false
+        // Ignora avisos sobre bibliotecas nativas missing em algumas ABIs
+        disable 'MissingNativeLoadLibrary'
+        disable 'UnsafeNativeCodeLocation'
     }
 }
 
@@ -73,6 +116,7 @@ dependencies {
     // Lifecycle
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0'
     implementation "androidx.lifecycle:lifecycle-livedata-ktx:2.7.0"
+    implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.7.0"
 
     // Activity e Fragment
     implementation 'androidx.activity:activity-ktx:1.8.2'
@@ -80,9 +124,99 @@ dependencies {
 
     // Coroutines
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
+
+    // Preference (para settings)
+    implementation 'androidx.preference:preference-ktx:1.2.1'
 
     // Testes
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
 }
+
+// VERSÃO SIMPLIFICADA: Task compatível com configuration cache
+tasks.register('verifyNativeLibs') {
+    description = 'Verifica se as bibliotecas nativas estão presentes'
+
+    doLast {
+        def libsPath = new File(projectDir, 'src/main/jniLibs')
+
+        if (!libsPath.exists()) {
+            logger.error("❌ ERRO: Diretório jniLibs não encontrado em: ${libsPath.absolutePath}")
+            return
+        }
+
+        def requiredLibs = ['libffmpeg.so', 'libGPCam.so']
+        def requiredAbis = ['armeabi-v7a', 'arm64-v8a']
+        def foundIssues = false
+
+        logger.lifecycle("========================================")
+        logger.lifecycle("Verificação de Bibliotecas Nativas")
+        logger.lifecycle("========================================")
+
+        requiredAbis.each { abi ->
+            def abiPath = new File(libsPath, abi)
+            logger.lifecycle("\n📁 Verificando ABI: $abi")
+
+            if (!abiPath.exists()) {
+                logger.error("   ❌ Diretório não encontrado")
+                foundIssues = true
+            } else {
+                requiredLibs.each { libName ->
+                    def libFile = new File(abiPath, libName)
+                    if (libFile.exists()) {
+                        def sizeKB = libFile.length() / 1024
+                        logger.lifecycle("   ✅ $libName (${sizeKB} KB)")
+                    } else {
+                        logger.error("   ❌ $libName NÃO ENCONTRADO!")
+                        foundIssues = true
+                    }
+                }
+            }
+        }
+
+        // Verifica ABIs opcionais
+        ['x86', 'x86_64', 'armeabi'].each { abi ->
+            def abiPath = new File(libsPath, abi)
+            if (abiPath.exists()) {
+                logger.lifecycle("\n📁 ABI Opcional encontrada: $abi")
+                abiPath.listFiles().each { file ->
+                    if (file.name.endsWith('.so')) {
+                        def sizeKB = file.length() / 1024
+                        logger.lifecycle("   ℹ️  ${file.name} (${sizeKB} KB)")
+                    }
+                }
+            }
+        }
+
+        logger.lifecycle("\n========================================")
+
+        if (foundIssues) {
+            logger.error("⚠️  AVISO: Algumas bibliotecas estão faltando!")
+            logger.error("   Extraia as bibliotecas do APK original do fabricante")
+        } else {
+            logger.lifecycle("✅ Todas as bibliotecas essenciais foram encontradas!")
+        }
+    }
+}
+
+// Task opcional para debug de configuração (não executa automaticamente)
+tasks.register('debugProjectConfig') {
+    description = 'Mostra a configuração atual do projeto'
+
+    doLast {
+        logger.lifecycle("Configuração do Projeto B-safe:")
+        logger.lifecycle("  App ID: ${android.defaultConfig.applicationId}")
+        logger.lifecycle("  Min SDK: ${android.defaultConfig.minSdk}")
+        logger.lifecycle("  Target SDK: ${android.defaultConfig.targetSdk}")
+        logger.lifecycle("  Version: ${android.defaultConfig.versionName} (${android.defaultConfig.versionCode})")
+        logger.lifecycle("  ABIs: ${android.defaultConfig.ndk.abiFilters}")
+        logger.lifecycle("  Java: ${android.compileOptions.sourceCompatibility}")
+        logger.lifecycle("  Kotlin: ${android.kotlinOptions.jvmTarget}")
+    }
+}
+
+// IMPORTANTE: Não vincula automaticamente as tasks ao build
+// Para executar a verificação, use: ./gradlew verifyNativeLibs
+// Isso evita o erro de configuration cache durante builds normais

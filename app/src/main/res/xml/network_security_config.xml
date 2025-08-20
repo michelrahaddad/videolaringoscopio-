@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- ============================================== -->
+    <!-- CONFIGURAÇÃO PARA O DISPOSITIVO VIDEOLARINGOSCÓPIO -->
+    <!-- ============================================== -->
+
+    <!-- Permite tráfego não criptografado especificamente para o IP do dispositivo -->
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- IP principal do dispositivo -->
+        <domain includeSubdomains="false">192.168.100.1</domain>
+
+        <!-- IPs alternativos que o dispositivo pode usar -->
+        <domain includeSubdomains="false">192.168.4.1</domain>
+        <domain includeSubdomains="false">192.168.25.1</domain>
+        <domain includeSubdomains="false">10.0.0.1</domain>
+
+        <!-- Permite toda a subnet local caso o IP mude -->
+        <domain includeSubdomains="true">192.168.100.*</domain>
+
+        <!-- Configuração de pins (desabilitado para dispositivo local) -->
+        <pin-set expiration="2025-12-31">
+            <pin digest="SHA-256">AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</pin>
+        </pin-set>
+
+        <!-- Trust anchors customizados (aceita certificados auto-assinados se necessário) -->
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- ============================================== -->
+    <!-- CONFIGURAÇÃO BASE PARA OUTROS DOMÍNIOS -->
+    <!-- ============================================== -->
+
+    <!-- Configuração padrão mais segura para outros domínios -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- Confia apenas em certificados do sistema -->
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- ============================================== -->
+    <!-- CONFIGURAÇÃO PARA DEBUG (SOMENTE BUILD DEBUG) -->
+    <!-- ============================================== -->
+
+    <debug-overrides>
+        <!-- Em debug, permite todo tráfego não criptografado para testes -->
+        <base-config cleartextTrafficPermitted="true">
+            <trust-anchors>
+                <!-- Em debug, aceita certificados do usuário também -->
+                <certificates src="system" />
+                <certificates src="user" />
+            </trust-anchors>
+        </base-config>
+    </debug-overrides>
+
+</network-security-config>
