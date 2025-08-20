@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Define id resources that are referenced in AlogInterface but
+         not declared in any layout.  Declaring them here ensures
+         R.id.bnLock, R.id.bnLockface2 and R.id.bnLockface exist at
+         compile time.  These ids are not associated with any actual
+         view in the current layouts.  If you later add views with
+         these identifiers, remove them from this file to avoid
+         duplicate id definitions. -->
+    <item name="bnLock" type="id"/>
+    <item name="bnLockface2" type="id"/>
+    <item name="bnLockface" type="id"/>
+    
+    <!-- Navigation menu IDs -->
+    <item name="nav_camera" type="id"/>
+    <item name="nav_gallery" type="id"/>
+    <item name="nav_slideshow" type="id"/>
+</resources>

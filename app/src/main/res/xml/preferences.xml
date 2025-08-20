@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <PreferenceCategory android:title="Configurações de Conexão">
+        <EditTextPreference
+            android:key="videolaringoscopio_ip"
+            android:title="IP do Videolaringoscópio"
+            android:summary="Endereço IP para conectar ao videolaringoscópio"
+            android:defaultValue="192.168.4.1" />
+
+        <EditTextPreference
+            android:key="videolaringoscopio_port"
+            android:title="Porta do Videolaringoscópio"
+            android:summary="Porta para comunicação UDP"
+            android:defaultValue="8888"
+            android:inputType="number" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="Configurações de Câmera">
+        <ListPreference
+            android:key="video_quality"
+            android:title="Qualidade do Vídeo"
+            android:summary="Selecione a qualidade de gravação"
+            android:entries="@array/video_quality_entries"
+            android:entryValues="@array/video_quality_values"
+            android:defaultValue="720p" />
+
+        <SwitchPreference
+            android:key="auto_save"
+            android:title="Salvamento Automático"
+            android:summary="Salvar automaticamente fotos e vídeos"
+            android:defaultValue="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="Configurações Avançadas">
+        <SwitchPreference
+            android:key="debug_mode"
+            android:title="Modo Debug"
+            android:summary="Ativar logs detalhados"
+            android:defaultValue="false" />
+
+        <EditTextPreference
+            android:key="connection_timeout"
+            android:title="Timeout de Conexão"
+            android:summary="Tempo limite em segundos"
+            android:defaultValue="30"
+            android:inputType="number" />
+    </PreferenceCategory>
+
+</PreferenceScreen>

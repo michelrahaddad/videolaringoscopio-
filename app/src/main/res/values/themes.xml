@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Tema base do aplicativo. -->
+    <style name="Theme.BsafeApp" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Cores primárias. -->
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryVariant">@color/colorPrimaryVariant</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <!-- Cores secundárias. -->
+        <item name="colorSecondary">@color/colorSecondary</item>
+        <item name="colorSecondaryVariant">@color/colorSecondaryVariant</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <!-- Cor da barra de status. -->
+        <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
+        <!-- Personalize seu tema aqui. -->
+    </style>
+</resources>

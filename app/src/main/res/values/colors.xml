@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Cores Padrão -->
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Cores do Tema (renomeadas a partir das suas) -->
+    <color name="colorPrimary">#FF6200EE</color> <!-- Era purple_500 -->
+    <color name="colorPrimaryVariant">#FF3700B3</color> <!-- Era purple_700 -->
+    <color name="colorSecondary">#FF03DAC5</color> <!-- Era teal_200 -->
+    <color name="colorSecondaryVariant">#FF018786</color> <!-- Era teal_700 -->
+
+    <!-- Sua cor customizada (mantida) -->
+    <color name="bsafe_icon_bg">#2E6F74</color>
+</resources>

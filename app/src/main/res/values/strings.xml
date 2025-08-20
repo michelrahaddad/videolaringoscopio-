@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- String resource used when the panorama download dialog is displayed.
+         Keeping it in a resource file allows easy translation and avoids
+         missing symbol errors at compile time. -->
+    <string name="Abort">Abort</string>
+    
+    <!-- App name and general strings -->
+    <string name="app_name">B-safe</string>
+    <string name="main_name">B-safe</string>
+    <string name="start_button">Start</string>
+    <string name="connect">Conectar</string>
+    <string name="disconnect">Desconectar</string>
+    <string name="connected">Conectado</string>
+    <string name="recording">Gravando</string>
+    <string name="stop_recording">Parar Gravação</string>
+    <string name="start_recording">Iniciar Gravação</string>
+    <string name="Connecting">Connecting...</string>
+    
+    <!-- Language options -->
+    <string name="item_Language0">English</string>
+    <string name="item_Language1">Português</string>
+    <string name="item_Language2">Español</string>
+    <string name="item_Language3">Français</string>
+    
+    <!-- Tab labels -->
+    <string name="tab_photo">Photo</string>
+    <string name="tab_video">Video</string>
+    
+    <!-- Video quality options -->
+    <string-array name="video_quality_entries">
+        <item>480p (SD)</item>
+        <item>720p (HD)</item>
+        <item>1080p (Full HD)</item>
+        <item>4K (Ultra HD)</item>
+    </string-array>
+    
+    <string-array name="video_quality_values">
+        <item>480p</item>
+        <item>720p</item>
+        <item>1080p</item>
+        <item>4k</item>
+    </string-array>
+    
+    <!-- You can add additional string resources here as the project grows. -->
+    <!--
+        Added a description for the application's logo. This string is used for content descriptions
+        in accessibility services (e.g., screen readers) so that users with visual impairments can
+        understand what the logo represents. Without this string, layouts referencing
+        @string/logo_description will fail to compile. The description is provided in Portuguese,
+        matching other localized strings in this file.
+    -->
+    <string name="logo_description">Descrição do logotipo</string>
+</resources>

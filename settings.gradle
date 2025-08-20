@@ -1,0 +1,2 @@
+rootProject.name = 'BsafeApp'
+include ':app'

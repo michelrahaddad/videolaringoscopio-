@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Include user preferences and settings -->
+    <include domain="sharedpref" path="drone_settings.xml"/>
+    <include domain="sharedpref" path="camera_settings.xml"/>
+    <include domain="sharedpref" path="connection_settings.xml"/>
+    
+    <!-- Include saved media files -->
+    <include domain="file" path="drone_photos/"/>
+    <include domain="file" path="drone_videos/"/>
+    
+    <!-- Exclude temporary files and cache -->
+    <exclude domain="file" path="temp/"/>
+    <exclude domain="cache"/>
+    
+    <!-- Exclude sensitive data -->
+    <exclude domain="sharedpref" path="device_tokens.xml"/>
+    <exclude domain="sharedpref" path="gcm_registration.xml"/>
+</full-backup-content>
+

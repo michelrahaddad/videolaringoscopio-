@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#1A2E35"
+    android:gravity="center_horizontal"
+    android:padding="16dp"
+    tools:context=".MainActivity">
+
+    <!-- Seu conteúdo principal centralizado -->
+    <LinearLayout
+        android:id="@+id/main_content_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_centerInParent="true"
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
+
+        <ImageView
+            android:id="@+id/logo_simple"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
+            android:contentDescription="Logo B-Safe"
+            app:srcCompat="@drawable/logo_bsafe" />
+
+        <!-- TextView ADICIONADO para o título que o Java procura -->
+        <TextView
+            android:id="@+id/app_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="B-safe Videolaryngoscope"
+            android:textAlignment="center"
+            android:textColor="#FFFFFF"
+            android:textSize="28sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/button_connect"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginStart="40dp"
+            android:layout_marginTop="32dp"
+            android:layout_marginEnd="40dp"
+            android:background="@drawable/rounded_button_orange"
+            android:text="Conectar"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <!-- TextView ADICIONADO para o status que o Java procura -->
+        <TextView
+            android:id="@+id/status_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Pronto para conectar"
+            android:textColor="#B0BEC5"
+            android:textSize="16sp" />
+
+    </LinearLayout>
+
+    <!-- Conteúdo do rodapé -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="24dp"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <!-- TextView ADICIONADO para a info do Wi-Fi que o Java procura -->
+        <TextView
+            android:id="@+id/wifi_info"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Rede: Simple-a09f10fdc3fc"
+            android:textColor="#78909C" />
+
+        <!-- TextView ADICIONADO para a versão que o Java procura -->
+        <TextView
+            android:id="@+id/app_version"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="v1.0"
+            android:textColor="#78909C" />
+
+    </LinearLayout>
+
+</RelativeLayout>

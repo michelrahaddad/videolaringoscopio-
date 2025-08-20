@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- =================================================================== -->
+    <!-- PERMISSÕES -->
+    <!-- =================================================================== -->
+
+    <!-- PERMISSÕES DE REDE -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <!-- CORREÇÃO CRÍTICA: Permissão OBRIGATÓRIA para que o app possa solicitar -->
+    <!-- a conexão com a rede Wi-Fi do videolaringoscópio. A ausência desta -->
+    <!-- permissão é a causa exata do crash "SecurityException". -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+
+    <!-- Permissão necessária em APIs mais recentes para escanear e se conectar a redes Wi-Fi. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+
+    <!-- PERMISSÕES DE MÍDIA -->
+    <!-- Permissão para gravar áudio durante a gravação de vídeos. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Permissão para salvar fotos e vídeos (necessária para Android 9 e inferior). -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+
+    <!-- PERMISSÃO DE CÂMERA -->
+    <!-- Embora a câmera do celular não seja usada, declarar isso pode ser necessário -->
+    <!-- para algumas APIs de mídia. `required="false"` garante que o app possa ser -->
+    <!-- instalado em dispositivos sem câmera. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-permission android:name="android.permission.CAMERA" />
+
+
+    <application
+        android:name=".BsafeApplication"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.BsafeApp"
+        android:usesCleartextTraffic="true"
+        tools:targetApi="31">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            tools:ignore="LockedOrientationActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".CameraActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.AppCompat.NoActionBar"
+            tools:ignore="LockedOrientationActivity" />
+
+        <!-- FileProvider para compartilhar mídias de forma segura -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.bsafe.videolaryngoscope.provider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/filepaths" />
+        </provider>
+
+    </application>
+
+</manifest>
