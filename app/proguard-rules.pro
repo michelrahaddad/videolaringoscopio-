@@ -9,14 +9,18 @@
     native <methods>;
 }
 
-# CRÍTICO: Manter as classes dos wrappers com seus nomes de pacotes exatos.
-# O nome do pacote para GPCamLib é "generalplus.com", mas para ffmpegLib é "com.generalplus".
-# Esta inconsistência vem das bibliotecas nativas e deve ser respeitada.
--keep class com.generalplus.ffmpegLib.** { *; }      <-- LINHA CORRIGIDA
+# CRÍTICO: Manter as classes dos wrappers com seus nomes de pacotes exatos
+# Observação: ffmpegLib usa "com.generalplus" enquanto GPCamLib usa "generalplus.com"
+-keep class com.generalplus.ffmpegLib.** { *; }
 -keep class generalplus.com.GPCamLib.** { *; }
 
 # Manter enums específicos dos wrappers
--keepclassmembers enum generalplus.com.ffmpegLib.ffmpegWrapper$* {
+-keepclassmembers enum com.generalplus.ffmpegLib.** {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
+
+-keepclassmembers enum generalplus.com.GPCamLib.** {
     public static **[] values();
     public static ** valueOf(java.lang.String);
 }
@@ -70,8 +74,8 @@
     java.lang.Object readResolve();
 }
 
-# Remover logs em release (opcional)
--assumenosideeffects class android.util.Log {
-    public static *** d(...);
-    public static *** v(...);
-}
+# Remover logs em release (opcional - descomente se desejar)
+#-assumenosideeffects class android.util.Log {
+#    public static *** d(...);
+#    public static *** v(...);
+#}

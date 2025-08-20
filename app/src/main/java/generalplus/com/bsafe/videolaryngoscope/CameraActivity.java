@@ -17,11 +17,12 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.FileProvider;
 
-// Importa AMBOS os wrappers
 import com.generalplus.ffmpegLib.ffmpegWrapper;
-import generalplus.com.GPCamLib.CamWrapper;
 
 import java.io.File;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -34,6 +35,8 @@ public class CameraActivity extends AppCompatActivity {
     private static final String FILE_PROVIDER_AUTHORITY = "com.bsafe.videolaryngoscope.provider";
     private static final String STREAM_URL = "rtsp://192.168.100.1:20000/?action=stream";
     private static final String DEVICE_IP = "192.168.100.1";
+    private static final int UDP_PORT = 20000;
+    private static final int CONNECTION_RETRY_DELAY_MS = 3000;
 
     // UI Components
     private GLSurfaceView glSurfaceView;
@@ -43,13 +46,14 @@ public class CameraActivity extends AppCompatActivity {
     private ImageButton buttonPhoto;
     private LinearLayout shareLayout;
 
-    // Wrappers do SDK
+    // SDK Wrapper
     private ffmpegWrapper ffmpeg;
-    private CamWrapper camWrapper; // Adicionado para a tentativa de "despertar"
 
+    // Connection state
     private boolean isConnected = false;
     private boolean isRecording = false;
     private String lastMediaPath = null;
+    private ExecutorService executorService;
 
     private final Handler handler = new Handler(Looper.getMainLooper()) {
         @Override
@@ -60,6 +64,7 @@ public class CameraActivity extends AppCompatActivity {
                         isConnected = true;
                         updateStatusText("Status: Conectado");
                         updateButtonStates();
+                        Log.i(TAG, "Stream conectado com sucesso!");
                     }
                     break;
                 case ffmpegWrapper.FFMPEG_STATUS_STOPPED:
@@ -67,7 +72,8 @@ public class CameraActivity extends AppCompatActivity {
                         isConnected = false;
                         updateStatusText("Erro: Conexão perdida");
                         updateButtonStates();
-                        handler.postDelayed(CameraActivity.this::startStream, 2000);
+                        Log.w(TAG, "Stream desconectado. Tentando reconectar...");
+                        handler.postDelayed(CameraActivity.this::startStreamWithUDPWakeup, CONNECTION_RETRY_DELAY_MS);
                     }
                     break;
                 case ffmpegWrapper.FFMPEG_STATUS_SAVESNAPSHOTCOMPLETE:
@@ -91,8 +97,10 @@ public class CameraActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.screen_camera);
         Log.d(TAG, "onCreate chamado");
+
+        executorService = Executors.newSingleThreadExecutor();
         initViews();
-        setupSDKWrappers();
+        setupSDKWrapper();
     }
 
     @Override
@@ -102,7 +110,8 @@ public class CameraActivity extends AppCompatActivity {
         if (glSurfaceView != null) {
             glSurfaceView.onResume();
         }
-        handler.postDelayed(this::startStream, 500);
+        // Inicia a conexão após um pequeno delay
+        handler.postDelayed(this::startStreamWithUDPWakeup, 500);
     }
 
     @Override
@@ -112,6 +121,14 @@ public class CameraActivity extends AppCompatActivity {
         stopStream();
         if (glSurfaceView != null) {
             glSurfaceView.onPause();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (executorService != null) {
+            executorService.shutdown();
         }
     }
 
@@ -131,62 +148,122 @@ public class CameraActivity extends AppCompatActivity {
         updateButtonStates();
     }
 
-    private void setupSDKWrappers() {
+    private void setupSDKWrapper() {
         try {
-            Log.d(TAG, "Configurando FFmpeg e CamWrapper...");
+            Log.d(TAG, "Configurando FFmpeg wrapper...");
             ffmpeg = new ffmpegWrapper();
             ffmpeg.SetViewHandler(handler);
-            camWrapper = new CamWrapper(); // Instancia o CamWrapper
 
             glSurfaceView.setEGLContextClientVersion(2);
             glSurfaceView.setRenderer(ffmpeg);
             glSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
-            Log.d(TAG, "Configuração dos SDKs concluída.");
+
+            Log.d(TAG, "Configuração do FFmpeg concluída.");
         } catch (Exception e) {
-            Log.e(TAG, "Erro crítico ao configurar os SDKs", e);
+            Log.e(TAG, "Erro crítico ao configurar o FFmpeg", e);
             Toast.makeText(this, "Erro ao iniciar o player de vídeo", Toast.LENGTH_LONG).show();
         }
     }
 
-    private void startStream() {
-        if (!isConnected) {
-            updateStatusText("Status: Conectando...");
+    /**
+     * Método principal que implementa o wake-up UDP antes de iniciar o stream RTSP
+     */
+    private void startStreamWithUDPWakeup() {
+        if (isConnected) {
+            Log.d(TAG, "Já conectado, ignorando nova tentativa de conexão");
+            return;
+        }
 
-            // Plano B: Tenta "despertar" o dispositivo com o CamWrapper primeiro.
-            ExecutorService executor = Executors.newSingleThreadExecutor();
-            executor.execute(() -> {
-                Log.d(TAG, "Tentando conectar com CamWrapper para 'despertar' o dispositivo...");
-                // Conecta e imediatamente reinicia o streaming
-                if (camWrapper.GPCamConnectToDevice(DEVICE_IP, 0) == 0) {
-                    Log.i(TAG, "CamWrapper conectado. Enviando comando de restart stream...");
-                    camWrapper.GPCamSendRestartStreaming();
-                    camWrapper.GPCamDisconnect(); // Desconecta para liberar a porta para o FFmpeg
-                    Log.i(TAG, "Comando de despertar enviado. Procedendo com FFmpeg.");
+        updateStatusText("Status: Conectando...");
 
-                    // Agora que o dispositivo foi 'despertado', inicia o player FFmpeg
-                    runOnUiThread(() -> {
-                        Log.i(TAG, "Iniciando stream RTSP para: " + STREAM_URL);
-                        ffmpegWrapper.naInitAndPlay(STREAM_URL, "");
-                    });
+        // Executa o wake-up UDP em background thread
+        executorService.execute(() -> {
+            Log.d(TAG, "Iniciando processo de wake-up UDP...");
 
-                } else {
-                    Log.w(TAG, "Falha ao conectar com CamWrapper. Tentando FFmpeg diretamente...");
-                    // Se a conexão com CamWrapper falhar, tenta o FFmpeg como antes.
-                    runOnUiThread(() -> {
-                        Log.i(TAG, "Iniciando stream RTSP para: " + STREAM_URL);
-                        ffmpegWrapper.naInitAndPlay(STREAM_URL, "");
-                    });
+            if (sendUDPWakeupPacket()) {
+                // Pequeno delay para garantir que o dispositivo processou o wake-up
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Log.e(TAG, "Interrupção durante o delay pós-wake-up", e);
                 }
-            });
+
+                // Inicia o stream RTSP na UI thread
+                runOnUiThread(() -> {
+                    Log.i(TAG, "Wake-up UDP enviado. Iniciando stream RTSP: " + STREAM_URL);
+                    try {
+                        ffmpegWrapper.naInitAndPlay(STREAM_URL, "");
+                        Log.d(TAG, "Comando naInitAndPlay enviado com sucesso");
+                    } catch (Exception e) {
+                        Log.e(TAG, "Erro ao iniciar stream RTSP", e);
+                        updateStatusText("Erro: Falha ao iniciar stream");
+                        // Retry após um delay
+                        handler.postDelayed(this::startStreamWithUDPWakeup, CONNECTION_RETRY_DELAY_MS);
+                    }
+                });
+            } else {
+                runOnUiThread(() -> {
+                    updateStatusText("Erro: Falha no wake-up");
+                    // Retry após um delay
+                    handler.postDelayed(this::startStreamWithUDPWakeup, CONNECTION_RETRY_DELAY_MS);
+                });
+            }
+        });
+    }
+
+    /**
+     * Envia um pacote UDP para "acordar" o dispositivo
+     * Simula o comportamento do app funcionante: envia dados UDP para 192.168.100.1:20000
+     */
+    private boolean sendUDPWakeupPacket() {
+        DatagramSocket socket = null;
+        try {
+            // Cria o socket UDP
+            socket = new DatagramSocket();
+            socket.setSoTimeout(1000); // Timeout de 1 segundo
+
+            // Prepara o pacote wake-up
+            // Pode ser qualquer dado pequeno, o importante é "bater na porta" do dispositivo
+            byte[] wakeupData = "WAKE_UP".getBytes();
+            InetAddress deviceAddress = InetAddress.getByName(DEVICE_IP);
+            DatagramPacket packet = new DatagramPacket(
+                    wakeupData,
+                    wakeupData.length,
+                    deviceAddress,
+                    UDP_PORT
+            );
+
+            // Envia o pacote wake-up
+            Log.d(TAG, String.format("Enviando pacote UDP wake-up para %s:%d", DEVICE_IP, UDP_PORT));
+            socket.send(packet);
+
+            // Tenta enviar múltiplos pacotes para garantir que pelo menos um chegue
+            for (int i = 0; i < 3; i++) {
+                socket.send(packet);
+                Thread.sleep(50); // 50ms entre cada envio
+            }
+
+            Log.i(TAG, "Pacotes UDP wake-up enviados com sucesso!");
+            return true;
+
+        } catch (Exception e) {
+            Log.e(TAG, "Erro ao enviar pacote UDP wake-up", e);
+            return false;
+        } finally {
+            if (socket != null && !socket.isClosed()) {
+                socket.close();
+            }
         }
     }
 
     private void stopStream() {
         if (ffmpeg != null) {
-            ffmpegWrapper.naStop();
-        }
-        if (camWrapper != null) {
-            camWrapper.GPCamDisconnect();
+            try {
+                ffmpegWrapper.naStop();
+                Log.d(TAG, "Stream parado");
+            } catch (Exception e) {
+                Log.e(TAG, "Erro ao parar stream", e);
+            }
         }
         isConnected = false;
     }
@@ -208,29 +285,49 @@ public class CameraActivity extends AppCompatActivity {
     }
 
     private void capturePhoto() {
-        if (!isConnected || isRecording) return;
+        if (!isConnected || isRecording) {
+            Log.w(TAG, "Não pode capturar foto: conectado=" + isConnected + ", gravando=" + isRecording);
+            return;
+        }
+
         try {
             File mediaDir = getAppMediaDirectory("Images");
-            if (mediaDir == null) return;
+            if (mediaDir == null) {
+                Toast.makeText(this, "Erro ao acessar diretório de mídia", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
             String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
             File photoFile = new File(mediaDir, "IMG_" + timestamp + ".jpg");
             lastMediaPath = photoFile.getAbsolutePath();
+
             Log.d(TAG, "Salvando snapshot em: " + lastMediaPath);
             ffmpegWrapper.naSaveSnapshot(lastMediaPath);
         } catch (Exception e) {
             Log.e(TAG, "Erro ao capturar foto", e);
+            Toast.makeText(this, "Erro ao capturar foto", Toast.LENGTH_SHORT).show();
         }
     }
 
     private void toggleRecording() {
-        if (!isConnected) return;
+        if (!isConnected) {
+            Log.w(TAG, "Não pode gravar: não conectado");
+            return;
+        }
+
         if (!isRecording) {
             try {
                 File mediaDir = getAppMediaDirectory("Videos");
-                if (mediaDir == null) return;
+                if (mediaDir == null) {
+                    Toast.makeText(this, "Erro ao acessar diretório de mídia", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
                 String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
                 File videoFile = new File(mediaDir, "VID_" + timestamp);
                 lastMediaPath = videoFile.getAbsolutePath();
+
+                Log.d(TAG, "Iniciando gravação em: " + lastMediaPath);
                 if (ffmpegWrapper.naSaveVideo(lastMediaPath) == 0) {
                     isRecording = true;
                     buttonRecord.setImageResource(android.R.drawable.ic_media_pause);
@@ -240,9 +337,15 @@ public class CameraActivity extends AppCompatActivity {
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Erro ao iniciar gravação", e);
+                Toast.makeText(this, "Erro ao iniciar gravação", Toast.LENGTH_SHORT).show();
             }
         } else {
-            ffmpegWrapper.naStopSaveVideo();
+            try {
+                ffmpegWrapper.naStopSaveVideo();
+                Log.d(TAG, "Parando gravação");
+            } catch (Exception e) {
+                Log.e(TAG, "Erro ao parar gravação", e);
+            }
         }
         updateButtonStates();
     }
@@ -251,7 +354,7 @@ public class CameraActivity extends AppCompatActivity {
         File mediaDir = new File(getExternalFilesDir(null), "BsafeMedia/" + type);
         if (!mediaDir.exists()) {
             if (!mediaDir.mkdirs()) {
-                Log.e(TAG, "Não foi possível criar o diretório de mídia.");
+                Log.e(TAG, "Não foi possível criar o diretório de mídia: " + mediaDir.getAbsolutePath());
                 return null;
             }
         }
@@ -261,7 +364,10 @@ public class CameraActivity extends AppCompatActivity {
     private void showFlashEffect() {
         flashImageView.setVisibility(View.VISIBLE);
         flashImageView.setAlpha(0.8f);
-        flashImageView.animate().alpha(0f).setDuration(300).withEndAction(() -> flashImageView.setVisibility(View.GONE));
+        flashImageView.animate()
+                .alpha(0f)
+                .setDuration(300)
+                .withEndAction(() -> flashImageView.setVisibility(View.GONE));
     }
 
     private void showShareOption() {
@@ -273,26 +379,37 @@ public class CameraActivity extends AppCompatActivity {
     }
 
     private void shareLastMedia() {
-        if (lastMediaPath == null || lastMediaPath.isEmpty()) return;
+        if (lastMediaPath == null || lastMediaPath.isEmpty()) {
+            Toast.makeText(this, "Nenhuma mídia para compartilhar", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
         File fileToShare = new File(lastMediaPath);
+
+        // Verifica se o arquivo existe (pode ter sido salvo com extensão .mp4)
         if (!fileToShare.exists()) {
             File mp4File = new File(lastMediaPath + ".mp4");
-            if (mp4File.exists()) fileToShare = mp4File;
-            else {
+            if (mp4File.exists()) {
+                fileToShare = mp4File;
+            } else {
                 Toast.makeText(this, "Arquivo não encontrado", Toast.LENGTH_SHORT).show();
                 return;
             }
         }
+
         try {
             android.net.Uri uri = FileProvider.getUriForFile(this, FILE_PROVIDER_AUTHORITY, fileToShare);
             String mimeType = getContentResolver().getType(uri);
+
             Intent shareIntent = new Intent(Intent.ACTION_SEND);
             shareIntent.setType(mimeType != null ? mimeType : "application/octet-stream");
             shareIntent.putExtra(Intent.EXTRA_STREAM, uri);
             shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
             startActivity(Intent.createChooser(shareIntent, "Compartilhar via"));
         } catch (Exception e) {
             Log.e(TAG, "Erro ao compartilhar mídia", e);
+            Toast.makeText(this, "Erro ao compartilhar mídia", Toast.LENGTH_SHORT).show();
         }
     }
 }

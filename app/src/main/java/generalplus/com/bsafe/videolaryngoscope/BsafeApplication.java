@@ -10,21 +10,27 @@ public class BsafeApplication extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        Log.d(TAG, "Aplicação iniciada");
 
-        // Ponto CRÍTICO para o funcionamento do app.
-        // Carrega as bibliotecas nativas de forma centralizada ao iniciar o aplicativo.
+        // Carrega as bibliotecas nativas necessárias
+        loadNativeLibraries();
+    }
+
+    private void loadNativeLibraries() {
+        // Carrega a biblioteca GPCam (não está sendo usada diretamente, mas pode ser necessária)
         try {
             System.loadLibrary("GPCam");
             Log.i(TAG, "Biblioteca nativa 'libGPCam.so' carregada com sucesso.");
         } catch (UnsatisfiedLinkError e) {
-            Log.e(TAG, "FALHA CRÍTICA ao carregar 'libGPCam.so'. Verifique se o arquivo .so está nas pastas jniLibs.", e);
+            Log.w(TAG, "Biblioteca 'libGPCam.so' não encontrada ou não necessária", e);
         }
 
+        // Carrega a biblioteca ffmpeg (essencial para o streaming)
         try {
             System.loadLibrary("ffmpeg");
             Log.i(TAG, "Biblioteca nativa 'libffmpeg.so' carregada com sucesso.");
         } catch (UnsatisfiedLinkError e) {
-            Log.e(TAG, "FALHA CRÍTICA ao carregar 'libffmpeg.so'. Verifique se o arquivo .so está nas pastas jniLibs.", e);
+            Log.e(TAG, "FALHA CRÍTICA ao carregar 'libffmpeg.so'. O streaming não funcionará!", e);
         }
     }
 }
