@@ -1,25 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Se você salva vídeos na pasta DCIM/Camera do armazenamento externo público -->
+    <!-- Diretório principal para mídia do app -->
+    <external-files-path
+        name="bsafe_media"
+        path="BsafeMedia/" />
+
+    <!-- Acesso ao armazenamento externo -->
     <external-path
-        name="my_videos_dcim_camera"
-        path="DCIM/Camera/" />
+        name="external_files"
+        path="." />
 
-    <!-- Se você salva vídeos diretamente na pasta DCIM -->
-    <external-path
-        name="my_videos_dcim"
-        path="DCIM/" />
-
-    <!-- Se você salva vídeos na pasta Downloads pública -->
-    <external-path
-        name="my_videos_downloads"
-        path="Download/" />
-
-    <!-- Exemplo para o diretório de filmes específico do aplicativo (getExternalFilesDir(Environment.DIRECTORY_MOVIES)) -->
-    <!-- <external-files-path name="my_videos_app_specific" path="Movies/" /> -->
-
-    <!-- Adicione outros caminhos conforme necessário.
-         O atributo 'path' pode ser um diretório ou um arquivo específico.
-         Use "." para representar o diretório raiz definido pelo tipo de tag (ex: external-path path=".")
-    -->
+    <!-- Cache temporário -->
+    <cache-path
+        name="cache"
+        path="." />
 </paths>

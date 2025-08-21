@@ -10,27 +10,19 @@ public class BsafeApplication extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
-        Log.d(TAG, "Aplicação iniciada");
 
-        // Carrega as bibliotecas nativas necessárias
-        loadNativeLibraries();
-    }
+        Log.d(TAG, "=====================================");
+        Log.d(TAG, "    B-SAFE VIDEOLARYNGOSCOPE");
+        Log.d(TAG, "=====================================");
+        Log.d(TAG, "Protocolo: JHCMD sobre UDP");
+        Log.d(TAG, "IP do dispositivo: 192.168.100.1");
+        Log.d(TAG, "Porta de controle: 20000");
+        Log.d(TAG, "Porta de dados: 10900");
+        Log.d(TAG, "=====================================");
 
-    private void loadNativeLibraries() {
-        // Carrega a biblioteca GPCam (não está sendo usada diretamente, mas pode ser necessária)
-        try {
-            System.loadLibrary("GPCam");
-            Log.i(TAG, "Biblioteca nativa 'libGPCam.so' carregada com sucesso.");
-        } catch (UnsatisfiedLinkError e) {
-            Log.w(TAG, "Biblioteca 'libGPCam.so' não encontrada ou não necessária", e);
-        }
-
-        // Carrega a biblioteca ffmpeg (essencial para o streaming)
-        try {
-            System.loadLibrary("ffmpeg");
-            Log.i(TAG, "Biblioteca nativa 'libffmpeg.so' carregada com sucesso.");
-        } catch (UnsatisfiedLinkError e) {
-            Log.e(TAG, "FALHA CRÍTICA ao carregar 'libffmpeg.so'. O streaming não funcionará!", e);
-        }
+        // NÃO carregamos bibliotecas nativas pois:
+        // 1. libffmpeg.so foi feita para RTSP, não JHCMD
+        // 2. libGPCam.so usa protocolo diferente
+        // 3. Vamos usar Java puro para JHCMD/UDP
     }
 }

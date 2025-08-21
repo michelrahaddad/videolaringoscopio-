@@ -1,7 +1,7 @@
 package com.bsafe.videolaryngoscope;
 
-import android.content.Intent;
-import android.opengl.GLSurfaceView;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -17,9 +17,9 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.FileProvider;
 
-import com.generalplus.ffmpegLib.ffmpegWrapper;
-
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -34,534 +34,557 @@ public class CameraActivity extends AppCompatActivity {
     private static final String TAG = "CameraActivity";
     private static final String FILE_PROVIDER_AUTHORITY = "com.bsafe.videolaryngoscope.provider";
 
-    // Configurações de rede do dispositivo
+    // Configurações de rede baseadas na análise do protocolo
     private static final String DEVICE_IP = "192.168.100.1";
-    private static final int UDP_PORT = 20000;
-    private static final int CONNECTION_RETRY_DELAY_MS = 3000;
+    private static final int CONTROL_PORT = 20000;  // Porta UDP para comandos
+    private static final int DATA_PORT = 10900;      // Porta UDP para receber vídeo
 
-    // URL do stream - IMPORTANTE: usando RTSP que é o protocolo correto
-    private static final String STREAM_URL = "rtsp://192.168.100.1:20000/?action=stream";
+    // Comandos JHCMD do protocolo proprietário
+    private static final byte[] CMD_HANDSHAKE_1 = {'J', 'H', 'C', 'M', 'D', 0x10, 0x00};
+    private static final byte[] CMD_HANDSHAKE_2 = {'J', 'H', 'C', 'M', 'D', 0x20, 0x00};
+    private static final byte[] CMD_START_STREAM = {'J', 'H', 'C', 'M', 'D', (byte)0xD0, 0x01};
+    private static final byte[] CMD_STOP_STREAM = {'J', 'H', 'C', 'M', 'D', (byte)0xD0, 0x02};
+
+    private static final int KEEPALIVE_INTERVAL_MS = 5000; // 5 segundos
 
     // Componentes da UI
-    private GLSurfaceView glSurfaceView;
+    private ImageView streamImageView;
     private ImageView flashImageView;
     private TextView statusTextView;
     private ImageButton buttonRecord;
     private ImageButton buttonPhoto;
     private LinearLayout shareLayout;
 
-    // SDK Wrapper
-    private ffmpegWrapper ffmpeg;
+    // Sockets UDP
+    private DatagramSocket controlSocket;
+    private DatagramSocket dataSocket;
 
-    // Socket UDP para wake-up
-    private DatagramSocket udpSocket;
-
-    // Estado da conexão
-    private boolean isConnected = false;
+    // Estado
+    private volatile boolean isConnected = false;
+    private volatile boolean isReceivingStream = false;
     private boolean isRecording = false;
     private String lastMediaPath = null;
+
+    // Threads
     private ExecutorService executorService;
+    private Thread streamReceiverThread;
+    private Thread keepAliveThread;
 
-    // Flag para controlar tentativas de reconexão
-    private boolean isReconnecting = false;
+    // Buffer para frames
+    private ByteArrayOutputStream currentFrameData;
+    private int lastFrameCounter = -1;
+    private int packetsInCurrentFrame = 0;
 
-    /**
-     * Handler principal que processa mensagens do ffmpegWrapper
-     * Separamos os handlers para evitar conflitos de valores de constantes
-     */
-    private final Handler ffmpegHandler = new Handler(Looper.getMainLooper()) {
+    // Para gravação
+    private FileOutputStream videoOutputStream;
+    private File currentVideoFile;
+    private int framesRecorded = 0;
+
+    // Para captura de foto
+    private Bitmap lastFrameBitmap = null;
+
+    // Handler para UI
+    private final Handler uiHandler = new Handler(Looper.getMainLooper()) {
         @Override
         public void handleMessage(@NonNull Message msg) {
-            // Processa apenas mensagens do ffmpegWrapper
             switch (msg.what) {
-                case ffmpegWrapper.FFMPEG_STATUS_PLAYING:
-                    // Stream iniciado com sucesso
-                    if (!isConnected) {
-                        isConnected = true;
-                        isReconnecting = false;
-                        updateStatusText("Status: Conectado");
-                        updateButtonStates();
-                        Log.i(TAG, "Stream RTSP conectado com sucesso!");
-                    }
-                    break;
-
-                case ffmpegWrapper.FFMPEG_STATUS_STOPPED:
-                    // Stream parou ou foi desconectado
-                    if (isConnected) {
-                        isConnected = false;
-                        updateStatusText("Status: Desconectado");
-                        updateButtonStates();
-                        Log.w(TAG, "Stream RTSP desconectado");
-
-                        // Tenta reconectar automaticamente se não estiver já tentando
-                        if (!isReconnecting) {
-                            isReconnecting = true;
-                            handler.postDelayed(CameraActivity.this::startStreamWithUDPWakeup, CONNECTION_RETRY_DELAY_MS);
-                        }
-                    }
-                    break;
-
-                case ffmpegWrapper.FFMPEG_STATUS_BUFFERING:
-                    // Stream está carregando/bufferizando
-                    updateStatusText("Status: Carregando...");
-                    Log.d(TAG, "Stream bufferizando...");
-                    break;
-
-                case ffmpegWrapper.FFMPEG_STATUS_SAVESNAPSHOTCOMPLETE:
-                    // Foto foi salva com sucesso
-                    showFlashEffect();
-                    Toast.makeText(CameraActivity.this, "Foto salva!", Toast.LENGTH_SHORT).show();
-                    showShareOption();
-                    Log.i(TAG, "Snapshot salvo com sucesso");
-                    break;
-
-                case ffmpegWrapper.FFMPEG_STATUS_SAVEVIDEOCOMPLETE:
-                    // Gravação de vídeo foi concluída
-                    isRecording = false;
-                    buttonRecord.setImageResource(R.drawable.ic_record);
-                    Toast.makeText(CameraActivity.this, "Gravação salva!", Toast.LENGTH_SHORT).show();
-                    showShareOption();
+                case 1: // Conectado
+                    isConnected = true;
+                    updateStatusText("Status: Conectado");
                     updateButtonStates();
-                    Log.i(TAG, "Gravação de vídeo concluída");
                     break;
 
-                default:
-                    // Mensagem desconhecida
-                    Log.v(TAG, "Mensagem não tratada do ffmpegWrapper: " + msg.what);
+                case 2: // Desconectado
+                    isConnected = false;
+                    updateStatusText("Status: Desconectado");
+                    updateButtonStates();
+                    reconnectAfterDelay();
+                    break;
+
+                case 3: // Frame recebido
+                    byte[] jpegData = (byte[]) msg.obj;
+                    displayFrame(jpegData);
+                    if (isRecording) {
+                        saveFrameToVideo(jpegData);
+                    }
+                    break;
+
+                case 4: // Erro
+                    String error = (String) msg.obj;
+                    updateStatusText("Erro: " + error);
                     break;
             }
         }
     };
 
-    // Handler de conveniência para posts delayed (evita warnings do IDE)
-    private final Handler handler = new Handler(Looper.getMainLooper());
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.screen_camera);
-        Log.d(TAG, "onCreate chamado");
+        Log.d(TAG, "onCreate - Iniciando CameraActivity");
 
-        // Inicializa o executor service para tarefas em background
-        executorService = Executors.newSingleThreadExecutor();
+        executorService = Executors.newCachedThreadPool();
+        currentFrameData = new ByteArrayOutputStream(100 * 1024); // 100KB inicial
 
-        // Inicializa as views e configura o SDK
         initViews();
-        setupFFmpegWrapper();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        Log.d(TAG, "onResume chamado");
+        Log.d(TAG, "onResume - Conectando ao dispositivo");
 
-        if (glSurfaceView != null) {
-            glSurfaceView.onResume();
-        }
-
-        // Inicia a conexão após um pequeno delay para garantir que tudo está inicializado
-        handler.postDelayed(this::startStreamWithUDPWakeup, 500);
+        // Inicia conexão após pequeno delay
+        uiHandler.postDelayed(() -> {
+            executorService.execute(this::connectToDevice);
+        }, 500);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        Log.d(TAG, "onPause chamado");
+        Log.d(TAG, "onPause - Desconectando");
 
-        // Para o stream quando a activity não está visível
-        stopStream();
-
-        if (glSurfaceView != null) {
-            glSurfaceView.onPause();
+        if (isRecording) {
+            stopRecording();
         }
+
+        disconnectFromDevice();
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        Log.d(TAG, "onDestroy chamado");
-
-        // Limpa recursos
-        closeUdpSocket();
+        Log.d(TAG, "onDestroy");
 
         if (executorService != null) {
             executorService.shutdown();
         }
     }
 
-    /**
-     * Inicializa todos os componentes da interface
-     */
     private void initViews() {
-        // Views principais
-        glSurfaceView = findViewById(R.id.gl_surface_view);
+        // Localiza views
+        streamImageView = findViewById(R.id.jpeg_image_view);
         flashImageView = findViewById(R.id.flash_image_view);
         statusTextView = findViewById(R.id.download_status_textview);
-
-        // Botões de controle
         buttonRecord = findViewById(R.id.button_record);
         buttonPhoto = findViewById(R.id.button_photo);
         shareLayout = findViewById(R.id.share_layout);
 
-        // Configura listeners dos botões
+        // Configuração inicial
+        streamImageView.setVisibility(View.VISIBLE);
+        findViewById(R.id.gl_surface_view).setVisibility(View.GONE); // Não usa OpenGL
+
+        // Listeners
         findViewById(R.id.button_back).setOnClickListener(v -> finish());
         buttonRecord.setOnClickListener(v -> toggleRecording());
         buttonPhoto.setOnClickListener(v -> capturePhoto());
         shareLayout.setOnClickListener(v -> shareLastMedia());
 
-        // Estado inicial dos botões
         updateButtonStates();
     }
 
     /**
-     * Configura o FFmpeg wrapper para renderização do stream
+     * Conecta ao dispositivo usando protocolo JHCMD
      */
-    private void setupFFmpegWrapper() {
+    private void connectToDevice() {
         try {
-            Log.d(TAG, "Configurando FFmpeg wrapper...");
+            Log.d(TAG, ">>> INICIANDO CONEXÃO COM CÂMERA <<<");
+            updateStatusText("Conectando...");
 
-            // Cria e configura o wrapper
-            ffmpeg = new ffmpegWrapper();
-            ffmpeg.SetViewHandler(ffmpegHandler);
+            // Cria sockets
+            controlSocket = new DatagramSocket();
+            controlSocket.setSoTimeout(3000);
 
-            // Configura o GLSurfaceView para renderização
-            glSurfaceView.setEGLContextClientVersion(2);
-            glSurfaceView.setRenderer(ffmpeg);
-            glSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
+            dataSocket = new DatagramSocket(DATA_PORT);
+            dataSocket.setSoTimeout(100); // Timeout curto
 
-            Log.d(TAG, "Configuração do FFmpeg concluída");
-        } catch (Exception e) {
-            Log.e(TAG, "Erro crítico ao configurar o FFmpeg", e);
-            Toast.makeText(this, "Erro ao iniciar o player de vídeo", Toast.LENGTH_LONG).show();
-            finish(); // Fecha a activity se não conseguir configurar
-        }
-    }
+            Log.d(TAG, "Sockets criados - Porta de dados: " + DATA_PORT);
 
-    /**
-     * Método principal que implementa o wake-up UDP seguido da conexão RTSP
-     * Este é o fluxo correto: primeiro "acorda" o dispositivo via UDP, depois conecta via RTSP
-     */
-    private void startStreamWithUDPWakeup() {
-        if (isConnected) {
-            Log.d(TAG, "Já conectado, ignorando nova tentativa de conexão");
-            return;
-        }
-
-        updateStatusText("Status: Conectando...");
-
-        // Executa o processo de conexão em background thread
-        executorService.execute(() -> {
-            Log.d(TAG, "Iniciando processo de wake-up UDP...");
-
-            // Passo 1: Enviar pacote UDP para "acordar" o dispositivo
-            if (sendUDPWakeupPacket()) {
-                // Pequeno delay para garantir que o dispositivo processou o wake-up
-                try {
-                    Thread.sleep(200);
-                } catch (InterruptedException e) {
-                    Log.e(TAG, "Interrupção durante o delay pós-wake-up", e);
-                }
-
-                // Passo 2: Iniciar o stream RTSP na UI thread
-                runOnUiThread(() -> {
-                    Log.i(TAG, "Wake-up UDP enviado. Iniciando stream RTSP: " + STREAM_URL);
-                    try {
-                        // Inicia o stream com opções vazias (usa padrões do ffmpeg)
-                        ffmpegWrapper.naInitAndPlay(STREAM_URL, "");
-                        Log.d(TAG, "Comando naInitAndPlay enviado com sucesso");
-                    } catch (Exception e) {
-                        Log.e(TAG, "Erro ao iniciar stream RTSP", e);
-                        updateStatusText("Erro: Falha ao iniciar stream");
-
-                        // Tenta novamente após um delay
-                        isReconnecting = true;
-                        handler.postDelayed(this::startStreamWithUDPWakeup, CONNECTION_RETRY_DELAY_MS);
-                    }
-                });
-            } else {
-                runOnUiThread(() -> {
-                    updateStatusText("Erro: Falha no wake-up");
-
-                    // Tenta novamente após um delay
-                    isReconnecting = true;
-                    handler.postDelayed(this::startStreamWithUDPWakeup, CONNECTION_RETRY_DELAY_MS);
-                });
-            }
-        });
-    }
-
-    /**
-     * Envia um pacote UDP para "acordar" o dispositivo
-     * O dispositivo espera receber um pacote UDP antes de aceitar conexões RTSP
-     */
-    private boolean sendUDPWakeupPacket() {
-        DatagramSocket socket = null;
-        try {
-            // Cria o socket UDP
-            socket = new DatagramSocket();
-            socket.setSoTimeout(1000); // Timeout de 1 segundo
-
-            // Prepara o pacote wake-up
-            // O conteúdo pode variar dependendo do dispositivo
-            // Alguns dispositivos esperam comandos específicos
-            byte[] wakeupData = "WAKE_UP".getBytes();
             InetAddress deviceAddress = InetAddress.getByName(DEVICE_IP);
-            DatagramPacket packet = new DatagramPacket(
-                    wakeupData,
-                    wakeupData.length,
-                    deviceAddress,
-                    UDP_PORT
-            );
 
-            // Envia o pacote wake-up
-            Log.d(TAG, String.format("Enviando pacote UDP wake-up para %s:%d", DEVICE_IP, UDP_PORT));
-            socket.send(packet);
+            // Sequência de inicialização
+            Log.d(TAG, "Enviando handshake...");
 
-            // Envia múltiplos pacotes para garantir que pelo menos um chegue
-            // Alguns dispositivos podem perder o primeiro pacote
-            for (int i = 0; i < 3; i++) {
-                socket.send(packet);
-                Thread.sleep(50); // 50ms entre cada envio
-            }
+            sendCommand(CMD_HANDSHAKE_1, deviceAddress);
+            Thread.sleep(200);
 
-            Log.i(TAG, "Pacotes UDP wake-up enviados com sucesso!");
-            return true;
+            sendCommand(CMD_HANDSHAKE_2, deviceAddress);
+            Thread.sleep(200);
+
+            sendCommand(CMD_START_STREAM, deviceAddress);
+            Thread.sleep(100);
+            sendCommand(CMD_START_STREAM, deviceAddress); // Envia 2x
+
+            // Inicia threads
+            isReceivingStream = true;
+            startStreamReceiver();
+            startKeepAlive(deviceAddress);
+
+            uiHandler.sendEmptyMessage(1);
+            Log.d(TAG, ">>> CONEXÃO ESTABELECIDA <<<");
 
         } catch (Exception e) {
-            Log.e(TAG, "Erro ao enviar pacote UDP wake-up", e);
-            return false;
-        } finally {
-            // Sempre fecha o socket
-            if (socket != null && !socket.isClosed()) {
-                socket.close();
+            Log.e(TAG, "ERRO ao conectar", e);
+            Message msg = uiHandler.obtainMessage(4, "Falha na conexão: " + e.getMessage());
+            uiHandler.sendMessage(msg);
+            disconnectFromDevice();
+        }
+    }
+
+    private void sendCommand(byte[] command, InetAddress address) throws Exception {
+        DatagramPacket packet = new DatagramPacket(
+                command, command.length, address, CONTROL_PORT
+        );
+        controlSocket.send(packet);
+
+        // Log para debug
+        StringBuilder hex = new StringBuilder("CMD enviado: ");
+        for (byte b : command) {
+            hex.append(String.format("%02X ", b & 0xFF));
+        }
+        Log.d(TAG, hex.toString());
+    }
+
+    /**
+     * Thread receptora de stream
+     */
+    private void startStreamReceiver() {
+        streamReceiverThread = new Thread(() -> {
+            byte[] buffer = new byte[1500];
+            DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+
+            Log.d(TAG, "Receptor iniciado na porta " + DATA_PORT);
+
+            int totalPackets = 0;
+            long startTime = System.currentTimeMillis();
+
+            while (isReceivingStream) {
+                try {
+                    dataSocket.receive(packet);
+                    totalPackets++;
+
+                    // Log periódico
+                    if (totalPackets % 100 == 0) {
+                        long elapsed = System.currentTimeMillis() - startTime;
+                        float rate = (totalPackets * 1000f) / elapsed;
+                        Log.d(TAG, String.format("Pacotes: %d (%.0f/s)", totalPackets, rate));
+                    }
+
+                    // Processa pacote
+                    processPacket(packet.getData(), packet.getLength());
+
+                } catch (Exception e) {
+                    // Timeout é normal, outros erros não
+                    if (!e.getMessage().contains("timeout") && isReceivingStream) {
+                        Log.e(TAG, "Erro recebendo", e);
+                    }
+                }
+            }
+
+            Log.d(TAG, "Receptor finalizado. Total: " + totalPackets + " pacotes");
+        });
+
+        streamReceiverThread.setName("StreamRX");
+        streamReceiverThread.start();
+    }
+
+    /**
+     * Processa pacote de vídeo
+     */
+    private void processPacket(byte[] data, int length) {
+        if (length <= 8) return; // Muito pequeno
+
+        // Header de 8 bytes
+        int frameNum = ((data[0] & 0xFF) << 8) | (data[1] & 0xFF);
+        int packetIdx = data[3] & 0xFF;
+
+        // Novo frame?
+        if (frameNum != lastFrameCounter || packetIdx == 0) {
+            if (currentFrameData.size() > 0) {
+                checkAndSendFrame();
+            }
+            lastFrameCounter = frameNum;
+            currentFrameData.reset();
+            packetsInCurrentFrame = 0;
+        }
+
+        // Adiciona dados (pula header)
+        currentFrameData.write(data, 8, length - 8);
+        packetsInCurrentFrame++;
+
+        // Verifica fim do JPEG (FFD9)
+        if (length >= 10) {
+            int p = length - 2;
+            if ((data[p] & 0xFF) == 0xFF && (data[p + 1] & 0xFF) == 0xD9) {
+                checkAndSendFrame();
             }
         }
     }
 
     /**
-     * Fecha o socket UDP se estiver aberto
+     * Verifica e envia frame completo
      */
-    private void closeUdpSocket() {
-        if (udpSocket != null && !udpSocket.isClosed()) {
-            try {
-                udpSocket.close();
-                Log.d(TAG, "Socket UDP fechado");
-            } catch (Exception e) {
-                Log.e(TAG, "Erro ao fechar socket UDP", e);
-            }
-            udpSocket = null;
+    private void checkAndSendFrame() {
+        byte[] jpeg = currentFrameData.toByteArray();
+
+        // Valida JPEG (começa com FFD8)
+        if (jpeg.length > 2 &&
+                (jpeg[0] & 0xFF) == 0xFF &&
+                (jpeg[1] & 0xFF) == 0xD8) {
+
+            Message msg = uiHandler.obtainMessage(3, jpeg);
+            uiHandler.sendMessage(msg);
         }
+
+        currentFrameData.reset();
+        packetsInCurrentFrame = 0;
     }
 
     /**
-     * Para o stream e limpa recursos
+     * Thread de keep-alive
      */
-    private void stopStream() {
-        if (ffmpeg != null) {
-            try {
-                ffmpegWrapper.naStop();
-                Log.d(TAG, "Stream parado");
-            } catch (Exception e) {
-                Log.e(TAG, "Erro ao parar stream", e);
-            }
-        }
+    private void startKeepAlive(InetAddress address) {
+        keepAliveThread = new Thread(() -> {
+            Log.d(TAG, "Keep-alive iniciado");
+            int count = 0;
 
-        closeUdpSocket();
-        isConnected = false;
-        isReconnecting = false;
-    }
+            while (isReceivingStream) {
+                try {
+                    Thread.sleep(KEEPALIVE_INTERVAL_MS);
+                    sendCommand(CMD_START_STREAM, address);
 
-    /**
-     * Atualiza o texto de status na UI thread
-     */
-    private void updateStatusText(final String text) {
-        runOnUiThread(() -> {
-            if (statusTextView != null) {
-                statusTextView.setText(text);
+                    if (++count % 10 == 0) {
+                        Log.d(TAG, "Keep-alive #" + count);
+                    }
+                } catch (Exception e) {
+                    if (isReceivingStream) {
+                        Log.e(TAG, "Erro keep-alive", e);
+                    }
+                }
             }
         });
+
+        keepAliveThread.setName("KeepAlive");
+        keepAliveThread.start();
     }
 
     /**
-     * Atualiza o estado dos botões baseado no status da conexão
+     * Desconecta do dispositivo
      */
-    private void updateButtonStates() {
-        runOnUiThread(() -> {
-            // Botões só ficam habilitados quando conectado
-            buttonRecord.setEnabled(isConnected);
-            buttonPhoto.setEnabled(isConnected && !isRecording);
+    private void disconnectFromDevice() {
+        Log.d(TAG, ">>> DESCONECTANDO <<<");
+        isReceivingStream = false;
 
-            // Esconde opção de compartilhar por padrão
-            shareLayout.setVisibility(View.INVISIBLE);
-        });
+        // Envia comando stop
+        try {
+            if (controlSocket != null && !controlSocket.isClosed()) {
+                sendCommand(CMD_STOP_STREAM, InetAddress.getByName(DEVICE_IP));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Erro enviando STOP", e);
+        }
+
+        // Fecha sockets
+        if (controlSocket != null) controlSocket.close();
+        if (dataSocket != null) dataSocket.close();
+
+        // Aguarda threads
+        try {
+            if (streamReceiverThread != null) {
+                streamReceiverThread.join(2000);
+            }
+            if (keepAliveThread != null) {
+                keepAliveThread.join(1000);
+            }
+        } catch (InterruptedException ignored) {}
+
+        uiHandler.sendEmptyMessage(2);
     }
 
     /**
-     * Captura uma foto do stream atual
+     * Reconecta após delay
+     */
+    private void reconnectAfterDelay() {
+        uiHandler.postDelayed(() -> {
+            if (!isConnected && !isFinishing()) {
+                executorService.execute(this::connectToDevice);
+            }
+        }, 3000);
+    }
+
+    /**
+     * Exibe frame na tela
+     */
+    private void displayFrame(byte[] jpegData) {
+        try {
+            Bitmap bitmap = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.length);
+            if (bitmap != null) {
+                lastFrameBitmap = bitmap;
+                runOnUiThread(() -> streamImageView.setImageBitmap(bitmap));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Erro exibindo frame", e);
+        }
+    }
+
+    /**
+     * Captura foto
      */
     private void capturePhoto() {
-        if (!isConnected || isRecording) {
-            Log.w(TAG, "Não pode capturar foto: conectado=" + isConnected + ", gravando=" + isRecording);
-            Toast.makeText(this, "Aguarde a conexão ou pare a gravação", Toast.LENGTH_SHORT).show();
+        if (!isConnected || lastFrameBitmap == null) {
+            Toast.makeText(this, "Aguarde conexão", Toast.LENGTH_SHORT).show();
             return;
         }
 
         try {
-            // Cria o diretório de imagens se não existir
-            File mediaDir = getAppMediaDirectory("Images");
-            if (mediaDir == null) {
-                Toast.makeText(this, "Erro ao acessar diretório de mídia", Toast.LENGTH_SHORT).show();
-                return;
-            }
+            File photoDir = new File(getExternalFilesDir(null), "BsafeMedia/Images");
+            if (!photoDir.exists()) photoDir.mkdirs();
 
-            // Gera nome único para o arquivo
-            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
-            File photoFile = new File(mediaDir, "IMG_" + timestamp + ".jpg");
+            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+                    .format(new Date());
+            File photoFile = new File(photoDir, "IMG_" + timestamp + ".jpg");
+
+            FileOutputStream out = new FileOutputStream(photoFile);
+            lastFrameBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out);
+            out.close();
+
             lastMediaPath = photoFile.getAbsolutePath();
 
-            Log.d(TAG, "Salvando snapshot em: " + lastMediaPath);
-            ffmpegWrapper.naSaveSnapshot(lastMediaPath);
+            showFlashEffect();
+            Toast.makeText(this, "Foto salva!", Toast.LENGTH_SHORT).show();
+            showShareOption();
 
         } catch (Exception e) {
-            Log.e(TAG, "Erro ao capturar foto", e);
-            Toast.makeText(this, "Erro ao capturar foto", Toast.LENGTH_SHORT).show();
+            Log.e(TAG, "Erro salvando foto", e);
+            Toast.makeText(this, "Erro ao salvar", Toast.LENGTH_SHORT).show();
         }
     }
 
     /**
-     * Alterna entre iniciar e parar gravação de vídeo
+     * Alterna gravação
      */
     private void toggleRecording() {
         if (!isConnected) {
-            Log.w(TAG, "Não pode gravar: não conectado");
-            Toast.makeText(this, "Aguarde a conexão com o dispositivo", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Aguarde conexão", Toast.LENGTH_SHORT).show();
             return;
         }
 
         if (!isRecording) {
-            // Inicia gravação
-            try {
-                // Cria o diretório de vídeos se não existir
-                File mediaDir = getAppMediaDirectory("Videos");
-                if (mediaDir == null) {
-                    Toast.makeText(this, "Erro ao acessar diretório de mídia", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-
-                // Gera nome único para o arquivo
-                String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
-                File videoFile = new File(mediaDir, "VID_" + timestamp);
-                lastMediaPath = videoFile.getAbsolutePath();
-
-                Log.d(TAG, "Iniciando gravação em: " + lastMediaPath);
-
-                // Inicia a gravação
-                if (ffmpegWrapper.naSaveVideo(lastMediaPath) == 0) {
-                    isRecording = true;
-                    buttonRecord.setImageResource(android.R.drawable.ic_media_pause);
-                    Toast.makeText(this, "Gravação iniciada", Toast.LENGTH_SHORT).show();
-                    updateButtonStates();
-                } else {
-                    Toast.makeText(this, "Falha ao iniciar gravação", Toast.LENGTH_SHORT).show();
-                }
-
-            } catch (Exception e) {
-                Log.e(TAG, "Erro ao iniciar gravação", e);
-                Toast.makeText(this, "Erro ao iniciar gravação", Toast.LENGTH_SHORT).show();
-            }
+            startRecording();
         } else {
-            // Para gravação
+            stopRecording();
+        }
+    }
+
+    private void startRecording() {
+        try {
+            File videoDir = new File(getExternalFilesDir(null), "BsafeMedia/Videos");
+            if (!videoDir.exists()) videoDir.mkdirs();
+
+            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+                    .format(new Date());
+            currentVideoFile = new File(videoDir, "VID_" + timestamp + ".mjpeg");
+
+            videoOutputStream = new FileOutputStream(currentVideoFile);
+            framesRecorded = 0;
+            isRecording = true;
+
+            buttonRecord.setImageResource(android.R.drawable.ic_media_pause);
+            Toast.makeText(this, "Gravando...", Toast.LENGTH_SHORT).show();
+
+        } catch (Exception e) {
+            Log.e(TAG, "Erro iniciando gravação", e);
+        }
+    }
+
+    private void stopRecording() {
+        isRecording = false;
+
+        try {
+            if (videoOutputStream != null) {
+                videoOutputStream.close();
+                videoOutputStream = null;
+            }
+
+            if (currentVideoFile != null) {
+                lastMediaPath = currentVideoFile.getAbsolutePath();
+                buttonRecord.setImageResource(R.drawable.ic_record);
+                Toast.makeText(this, "Gravação salva! (" + framesRecorded + " frames)",
+                        Toast.LENGTH_SHORT).show();
+                showShareOption();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Erro parando gravação", e);
+        }
+    }
+
+    private void saveFrameToVideo(byte[] jpegData) {
+        if (videoOutputStream != null) {
             try {
-                ffmpegWrapper.naStopSaveVideo();
-                Log.d(TAG, "Parando gravação");
-                // O handler receberá FFMPEG_STATUS_SAVEVIDEOCOMPLETE quando terminar
+                // Salva tamanho + dados
+                videoOutputStream.write((jpegData.length >> 24) & 0xFF);
+                videoOutputStream.write((jpegData.length >> 16) & 0xFF);
+                videoOutputStream.write((jpegData.length >> 8) & 0xFF);
+                videoOutputStream.write(jpegData.length & 0xFF);
+                videoOutputStream.write(jpegData);
+                framesRecorded++;
             } catch (Exception e) {
-                Log.e(TAG, "Erro ao parar gravação", e);
-                isRecording = false;
-                updateButtonStates();
+                Log.e(TAG, "Erro salvando frame", e);
             }
         }
     }
 
-    /**
-     * Obtém o diretório apropriado para salvar mídia
-     */
-    private File getAppMediaDirectory(String type) {
-        // Usa o diretório privado do app para evitar problemas de permissão
-        File mediaDir = new File(getExternalFilesDir(null), "BsafeMedia/" + type);
-
-        if (!mediaDir.exists()) {
-            if (!mediaDir.mkdirs()) {
-                Log.e(TAG, "Não foi possível criar o diretório de mídia: " + mediaDir.getAbsolutePath());
-                return null;
-            }
-        }
-
-        return mediaDir;
-    }
-
-    /**
-     * Mostra efeito de flash quando tira foto
-     */
     private void showFlashEffect() {
-        flashImageView.setVisibility(View.VISIBLE);
-        flashImageView.setAlpha(0.8f);
-        flashImageView.animate()
-                .alpha(0f)
-                .setDuration(300)
-                .withEndAction(() -> flashImageView.setVisibility(View.GONE));
+        runOnUiThread(() -> {
+            flashImageView.setVisibility(View.VISIBLE);
+            flashImageView.setAlpha(0.8f);
+            flashImageView.animate()
+                    .alpha(0f)
+                    .setDuration(300)
+                    .withEndAction(() -> flashImageView.setVisibility(View.GONE));
+        });
     }
 
-    /**
-     * Mostra opção de compartilhar após salvar mídia
-     */
     private void showShareOption() {
         runOnUiThread(() -> {
             shareLayout.setVisibility(View.VISIBLE);
-            shareLayout.setAlpha(0f);
             shareLayout.animate().alpha(1f).setDuration(500);
         });
     }
 
-    /**
-     * Compartilha a última mídia capturada
-     */
     private void shareLastMedia() {
-        if (lastMediaPath == null || lastMediaPath.isEmpty()) {
-            Toast.makeText(this, "Nenhuma mídia para compartilhar", Toast.LENGTH_SHORT).show();
+        if (lastMediaPath == null) {
+            Toast.makeText(this, "Nada para compartilhar", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        File fileToShare = new File(lastMediaPath);
-
-        // Verifica se o arquivo existe (vídeos podem ter extensão .mp4 adicionada)
-        if (!fileToShare.exists()) {
-            File mp4File = new File(lastMediaPath + ".mp4");
-            if (mp4File.exists()) {
-                fileToShare = mp4File;
-            } else {
-                Toast.makeText(this, "Arquivo não encontrado", Toast.LENGTH_SHORT).show();
-                return;
-            }
+        File file = new File(lastMediaPath);
+        if (!file.exists()) {
+            Toast.makeText(this, "Arquivo não encontrado", Toast.LENGTH_SHORT).show();
+            return;
         }
 
         try {
-            // Cria URI usando FileProvider para compartilhamento seguro
-            android.net.Uri uri = FileProvider.getUriForFile(this, FILE_PROVIDER_AUTHORITY, fileToShare);
-            String mimeType = getContentResolver().getType(uri);
-
-            // Cria intent de compartilhamento
-            Intent shareIntent = new Intent(Intent.ACTION_SEND);
-            shareIntent.setType(mimeType != null ? mimeType : "application/octet-stream");
-            shareIntent.putExtra(Intent.EXTRA_STREAM, uri);
-            shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-
-            // Abre o seletor de apps para compartilhamento
-            startActivity(Intent.createChooser(shareIntent, "Compartilhar via"));
-
+            android.net.Uri uri = FileProvider.getUriForFile(this, FILE_PROVIDER_AUTHORITY, file);
+            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_SEND);
+            intent.setType(file.getName().endsWith(".jpg") ? "image/jpeg" : "video/*");
+            intent.putExtra(android.content.Intent.EXTRA_STREAM, uri);
+            intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(android.content.Intent.createChooser(intent, "Compartilhar"));
         } catch (Exception e) {
-            Log.e(TAG, "Erro ao compartilhar mídia", e);
-            Toast.makeText(this, "Erro ao compartilhar mídia", Toast.LENGTH_SHORT).show();
+            Log.e(TAG, "Erro compartilhando", e);
         }
+    }
+
+    private void updateStatusText(String text) {
+        runOnUiThread(() -> statusTextView.setText(text));
+    }
+
+    private void updateButtonStates() {
+        runOnUiThread(() -> {
+            buttonRecord.setEnabled(isConnected);
+            buttonPhoto.setEnabled(isConnected && !isRecording);
+        });
     }
 }
